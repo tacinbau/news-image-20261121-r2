@@ -1,672 +1,567 @@
 #!/usr/bin/env python3
 """THE WORLD - Saturday, 21 November 2026.
-A one-page newspaper front page summing up the day's world news.
-
-Stdlib-only. No network, no third-party imports, no fonts from disk.
-All text is rendered with an embedded 5x7 bitmap font.
-Output goes ONLY to $MAKEFUN_OUTPUT_DIR/entry.png (default /output).
-Deterministic: identical bytes on every run.
+A one-page visual newspaper, drawn from scratch with the Python
+standard library only. No network, no third-party packages.
+Writes exactly one file: $MAKEFUN_OUTPUT_DIR/entry.png (1024x1024 RGB).
+All facts verified live from AP, Reuters, BBC, CNN, AFP, USGS, ESA,
+ATP Tour, IMD and UN News for Saturday 21 November 2026.
 """
 import hashlib
 import os
 import struct
 import zlib
 
-W = 1024
-H = 1024
-
-# ---------------------------------------------------------------- font 5x7
-# Each glyph is 7 rows of 5 bits ("1" = ink). ASCII only.
-FONT = {
-    ' ': ("00000", "00000", "00000", "00000", "00000", "00000", "00000"),
-    '!': ("00100", "00100", "00100", "00100", "00100", "00000", "00100"),
-    '"': ("01010", "01010", "01010", "00000", "00000", "00000", "00000"),
-    '#': ("01010", "01010", "11111", "01010", "11111", "01010", "01010"),
-    '$': ("00100", "01111", "10100", "01110", "00101", "11110", "00100"),
-    '%': ("11001", "11010", "00010", "00100", "01000", "01011", "10011"),
-    '&': ("01100", "10010", "10100", "01000", "10101", "10010", "01101"),
-    "'": ("00100", "00100", "01000", "00000", "00000", "00000", "00000"),
-    '(': ("00010", "00100", "01000", "01000", "01000", "00100", "00010"),
-    ')': ("01000", "00100", "00010", "00010", "00010", "00100", "01000"),
-    '*': ("00000", "00100", "10101", "01110", "10101", "00100", "00000"),
-    '+': ("00000", "00100", "00100", "11111", "00100", "00100", "00000"),
-    ',': ("00000", "00000", "00000", "00000", "00000", "01100", "00100"),
-    '-': ("00000", "00000", "00000", "11111", "00000", "00000", "00000"),
-    '.': ("00000", "00000", "00000", "00000", "00000", "01100", "01100"),
-    '/': ("00001", "00010", "00010", "00100", "01000", "01000", "10000"),
-    '0': ("01110", "10001", "10011", "10101", "11001", "10001", "01110"),
-    '1': ("00100", "01100", "00100", "00100", "00100", "00100", "01110"),
-    '2': ("01110", "10001", "00001", "00110", "01000", "10000", "11111"),
-    '3': ("11111", "00010", "00100", "00010", "00001", "10001", "01110"),
-    '4': ("00010", "00110", "01010", "10010", "11111", "00010", "00010"),
-    '5': ("11111", "10000", "11110", "00001", "00001", "10001", "01110"),
-    '6': ("00110", "01000", "10000", "11110", "10001", "10001", "01110"),
-    '7': ("11111", "00001", "00010", "00100", "01000", "01000", "01000"),
-    '8': ("01110", "10001", "10001", "01110", "10001", "10001", "01110"),
-    '9': ("01110", "10001", "10001", "01111", "00001", "00010", "01100"),
-    ':': ("00000", "01100", "01100", "00000", "01100", "01100", "00000"),
-    ';': ("00000", "01100", "01100", "00000", "01100", "00100", "01000"),
-    '<': ("00010", "00100", "01000", "10000", "01000", "00100", "00010"),
-    '=': ("00000", "00000", "11111", "00000", "11111", "00000", "00000"),
-    '>': ("01000", "00100", "00010", "00001", "00010", "00100", "01000"),
-    '?': ("01110", "10001", "00001", "00110", "00100", "00000", "00100"),
-    '@': ("01110", "10001", "10111", "10101", "10110", "10000", "01110"),
-    'A': ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
-    'B': ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
-    'C': ("01110", "10001", "10000", "10000", "10000", "10001", "01110"),
-    'D': ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
-    'E': ("11111", "10000", "10000", "11110", "10000", "10000", "11111"),
-    'F': ("11111", "10000", "10000", "11110", "10000", "10000", "10000"),
-    'G': ("01110", "10001", "10000", "10111", "10001", "10001", "01111"),
-    'H': ("10001", "10001", "10001", "11111", "10001", "10001", "10001"),
-    'I': ("01110", "00100", "00100", "00100", "00100", "00100", "01110"),
-    'J': ("00111", "00010", "00010", "00010", "00010", "10010", "01100"),
-    'K': ("10001", "10010", "10100", "11000", "10100", "10010", "10001"),
-    'L': ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
-    'M': ("10001", "11011", "10101", "10101", "10001", "10001", "10001"),
-    'N': ("10001", "11001", "10101", "10011", "10001", "10001", "10001"),
-    'O': ("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
-    'P': ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
-    'Q': ("01110", "10001", "10001", "10001", "10101", "10010", "01101"),
-    'R': ("11110", "10001", "10001", "11110", "10100", "10010", "10001"),
-    'S': ("01111", "10000", "10000", "01110", "00001", "00001", "11110"),
-    'T': ("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
-    'U': ("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
-    'V': ("10001", "10001", "10001", "10001", "10001", "01010", "00100"),
-    'W': ("10001", "10001", "10001", "10101", "10101", "11011", "10001"),
-    'X': ("10001", "10001", "01010", "00100", "01010", "10001", "10001"),
-    'Y': ("10001", "10001", "01010", "00100", "00100", "00100", "00100"),
-    'Z': ("11111", "00001", "00010", "00100", "01000", "10000", "11111"),
-    '[': ("01110", "01000", "01000", "01000", "01000", "01000", "01110"),
-    '\\': ("10000", "01000", "01000", "00100", "00010", "00010", "00001"),
-    ']': ("01110", "00010", "00010", "00010", "00010", "00010", "01110"),
-    '^': ("00100", "01010", "10001", "00000", "00000", "00000", "00000"),
-    '_': ("00000", "00000", "00000", "00000", "00000", "00000", "11111"),
-    '`': ("01000", "00100", "00010", "00000", "00000", "00000", "00000"),
-    'a': ("00000", "00000", "01110", "00001", "01111", "10001", "01111"),
-    'b': ("10000", "10000", "11110", "10001", "10001", "10001", "11110"),
-    'c': ("00000", "00000", "01110", "10000", "10000", "10001", "01110"),
-    'd': ("00001", "00001", "01111", "10001", "10001", "10001", "01111"),
-    'e': ("00000", "00000", "01110", "10001", "11111", "10000", "01110"),
-    'f': ("00110", "01001", "01000", "11110", "01000", "01000", "01000"),
-    'g': ("00000", "01111", "10001", "10001", "01111", "00001", "01110"),
-    'h': ("10000", "10000", "11110", "10001", "10001", "10001", "10001"),
-    'i': ("00100", "00000", "01100", "00100", "00100", "00100", "01110"),
-    'j': ("00010", "00000", "00110", "00010", "00010", "00010", "10010"),
-    'k': ("10000", "10000", "10010", "10100", "11000", "10100", "10010"),
-    'l': ("01100", "00100", "00100", "00100", "00100", "00100", "01110"),
-    'm': ("00000", "00000", "11010", "10101", "10101", "10101", "10101"),
-    'n': ("00000", "00000", "11110", "10001", "10001", "10001", "10001"),
-    'o': ("00000", "00000", "01110", "10001", "10001", "10001", "01110"),
-    'p': ("00000", "00000", "11110", "10001", "10001", "11110", "10000"),
-    'q': ("00000", "00000", "01111", "10001", "10001", "01111", "00001"),
-    'r': ("00000", "00000", "10110", "11001", "10000", "10000", "10000"),
-    's': ("00000", "00000", "01111", "10000", "01110", "00001", "11110"),
-    't': ("01000", "01000", "11100", "01000", "01000", "01001", "00110"),
-    'u': ("00000", "00000", "10001", "10001", "10001", "10011", "01101"),
-    'v': ("00000", "00000", "10001", "10001", "10001", "01010", "00100"),
-    'w': ("00000", "00000", "10001", "10101", "10101", "10101", "01010"),
-    'x': ("00000", "00000", "10001", "01010", "00100", "01010", "10001"),
-    'y': ("00000", "00000", "10001", "10001", "01111", "00001", "01110"),
-    'z': ("00000", "00000", "11111", "00010", "00100", "01000", "11111"),
-    '{': ("00110", "01000", "01000", "11100", "01000", "01000", "00110"),
-    '|': ("00100", "00100", "00100", "00100", "00100", "00100", "00100"),
-    '}': ("01100", "00010", "00010", "00111", "00010", "00010", "01100"),
-    '~': ("00000", "00000", "00000", "01001", "10110", "00000", "00000"),
-}
-FALLBACK = FONT['?']
-
-
-def text_width(s, scale):
-    return len(s) * 6 * scale - scale
-
-
-# ---------------------------------------------------------------- palette
+W, H = 1024, 1024
 PAPER = (247, 242, 231)
-INK = (17, 17, 17)
-SOFT = (84, 84, 76)
-RULE = (180, 172, 152)
-RED = (178, 28, 28)
-DARKRED = (127, 18, 18)
-BLUE = (30, 58, 95)
-GOLD = (146, 90, 10)
-GREEN = (22, 101, 52)
-LIGHT = (238, 232, 216)
-CARD = (255, 253, 247)
-WHITE = (255, 255, 255)
+INK = (26, 26, 26)
+RED = (176, 42, 32)
+NAVY = (31, 58, 95)
+GOLD = (176, 141, 58)
+GREY = (110, 105, 95)
+LIGHT = (233, 226, 210)
+CREAM = (252, 249, 240)
+DARKRED = (140, 28, 20)
 
-# ---------------------------------------------------------------- canvas
-buf = bytearray(W * H * 3)
-
-
-def fill(c):
-    r, g, b = c
-    buf[0::3] = bytes([r]) * (W * H)
-    buf[1::3] = bytes([g]) * (W * H)
-    buf[2::3] = bytes([b]) * (W * H)
-
-
-def px(x, y, c):
-    if 0 <= x < W and 0 <= y < H:
-        i = (y * W + x) * 3
-        buf[i], buf[i + 1], buf[i + 2] = c
-
-
-def rect(x, y, w, h, c):
-    x0 = max(0, x)
-    y0 = max(0, y)
-    x1 = min(W, x + w)
-    y1 = min(H, y + h)
-    if x1 <= x0 or y1 <= y0:
-        return
-    r, g, b = c
-    row = bytes((r, g, b)) * (x1 - x0)
-    for yy in range(y0, y1):
-        i = (yy * W + x0) * 3
-        buf[i:i + len(row)] = row
+# 5x7 bitmap font. Each glyph = 7 rows of 5 bits (top to bottom).
+FONT = {
+    'A': (0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001),
+    'B': (0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110),
+    'C': (0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110),
+    'D': (0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110),
+    'E': (0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111),
+    'F': (0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000),
+    'G': (0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111),
+    'H': (0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001),
+    'I': (0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110),
+    'J': (0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100),
+    'K': (0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001),
+    'L': (0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111),
+    'M': (0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001),
+    'N': (0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001),
+    'O': (0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110),
+    'P': (0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000),
+    'Q': (0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101),
+    'R': (0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001),
+    'S': (0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110),
+    'T': (0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100),
+    'U': (0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110),
+    'V': (0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100),
+    'W': (0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010),
+    'X': (0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001),
+    'Y': (0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100),
+    'Z': (0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111),
+}
 
 
-def border(x, y, w, h, c, t=1):
-    rect(x, y, w, t, c)
-    rect(x, y + h - t, w, t, c)
-    rect(x, y, t, h, c)
-    rect(x + w - t, y, t, h, c)
+def chunk(tag, data):
+    c = struct.pack(">I", len(data)) + tag + data
+    return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
 
 
-def hline(x, y, w, c, t=1):
-    rect(x, y, w, t, c)
+def encode_png(pixels, w, h):
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)
+        raw += pixels[y * w * 3:(y + 1) * w * 3]
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+            + chunk(b"IEND", b""))
 
 
-def vline(x, y, h, c, t=1):
-    rect(x, y, t, h, c)
+class Canvas:
+    def __init__(self, w, h, bg):
+        self.w, self.h = w, h
+        self.px = bytearray(w * h * 3)
+        self.rect(0, 0, w, h, bg)
+
+    def rect(self, x, y, w, h, col):
+        x0, y0 = max(0, x), max(0, y)
+        x1, y1 = min(self.w, x + w), min(self.h, y + h)
+        r, g, b = col
+        for yy in range(y0, y1):
+            base = (yy * self.w + x0) * 3
+            for xx in range(x0, x1):
+                i = base + (xx - x0) * 3
+                self.px[i], self.px[i + 1], self.px[i + 2] = r, g, b
+
+    def hline(self, x, y, w, col, t=1):
+        self.rect(x, y, w, t, col)
+
+    def vline(self, x, y, h, col, t=1):
+        self.rect(x, y, t, h, col)
+
+    def dot(self, x, y, col):
+        if 0 <= x < self.w and 0 <= y < self.h:
+            i = (y * self.w + x) * 3
+            self.px[i], self.px[i + 1], self.px[i + 2] = col
+
+    def circle(self, cx, cy, r, col):
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                if dx * dx + dy * dy <= r * r:
+                    self.dot(cx + dx, cy + dy, col)
+
+    def ring(self, cx, cy, r, col):
+        for a in range(360):
+            import math
+            dx = int(r * math.cos(a * math.pi / 180))
+            dy = int(r * math.sin(a * math.pi / 180))
+            self.dot(cx + dx, cy + dy, col)
 
 
-def draw_char(x, y, ch, scale, c):
-    glyph = FONT.get(ch, FALLBACK)
-    for row in range(7):
-        bits = glyph[row]
-        for col in range(5):
-            if bits[col] == '1':
-                rect(x + col * scale, y + row * scale, scale, scale, c)
+FONT.update({
+    '0': (0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110),
+    '1': (0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110),
+    '2': (0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111),
+    '3': (0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110),
+    '4': (0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010),
+    '5': (0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110),
+    '6': (0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110),
+    '7': (0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000),
+    '8': (0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110),
+    '9': (0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100),
+    ' ': (0, 0, 0, 0, 0, 0, 0),
+    '.': (0, 0, 0, 0, 0, 0b01100, 0b01100),
+    ',': (0, 0, 0, 0, 0b01100, 0b00100, 0b01000),
+    ':': (0, 0b01100, 0b01100, 0, 0b01100, 0b01100, 0),
+    ';': (0, 0b01100, 0b01100, 0, 0b01100, 0b00100, 0b01000),
+    "'": (0b00100, 0b00100, 0b01000, 0, 0, 0, 0),
+    '-': (0, 0, 0, 0b01110, 0, 0, 0),
+    '(': (0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010),
+    ')': (0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000),
+    '/': (0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000),
+    '%': (0b11001, 0b11010, 0b00010, 0b00100, 0b01000, 0b01011, 0b10011),
+    '+': (0, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0),
+    '?': (0b01110, 0b10001, 0b00001, 0b00110, 0b00100, 0, 0b00100),
+    '!': (0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0, 0b00100),
+    '&': (0b01100, 0b10010, 0b10100, 0b01000, 0b10101, 0b10010, 0b01101),
+    '$': (0b00100, 0b01111, 0b10100, 0b01110, 0b00101, 0b11110, 0b00100),
+    '=': (0, 0, 0b11111, 0, 0b11111, 0, 0),
+    '"': (0b01010, 0b01010, 0, 0, 0, 0, 0),
+    '*': (0, 0b00100, 0b10101, 0b01110, 0b10101, 0b00100, 0),
+    '_': (0, 0, 0, 0, 0, 0, 0b11111),
+    '<': (0b00010, 0b00100, 0b01000, 0b10000, 0b01000, 0b00100, 0b00010),
+    '>': (0b01000, 0b00100, 0b00010, 0b00001, 0b00010, 0b00100, 0b01000),
+    '#': (0b01010, 0b01010, 0b11111, 0b01010, 0b11111, 0b01010, 0b01010),
+    '@': (0b01110, 0b10001, 0b10111, 0b10101, 0b10110, 0b10000, 0b01110),
+    '[': (0b01110, 0b01000, 0b01000, 0b01000, 0b01000, 0b01000, 0b01110),
+    ']': (0b01110, 0b00010, 0b00010, 0b00010, 0b00010, 0b00010, 0b01110),
+    '|': (0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100),
+    '\\': (0b10000, 0b01000, 0b01000, 0b00100, 0b00010, 0b00010, 0b00001),
+    '^': (0b00100, 0b01010, 0b10001, 0, 0, 0, 0),
+    '~': (0, 0, 0b01001, 0b10110, 0, 0, 0),
+    '`': (0b01000, 0b00100, 0, 0, 0, 0, 0),
+})
 
 
-def draw_text(x, y, s, scale, c):
+def text_w(s, scale=1):
+    return len(s) * 6 * scale - scale if s else 0
+
+
+def draw_text(cv, x, y, s, col, scale=1):
+    s = s.upper()
     cx = x
     for ch in s:
-        draw_char(cx, y, ch, scale, c)
+        g = FONT.get(ch)
+        if g is None:
+            cx += 6 * scale
+            continue
+        for row in range(7):
+            bits = g[row]
+            for bit in range(5):
+                if bits & (1 << (4 - bit)):
+                    cv.rect(cx + bit * scale, y + row * scale, scale, scale, col)
         cx += 6 * scale
-    return cx - x
+    return cx
 
 
-def draw_text_center(cx, y, s, scale, c):
-    w = text_width(s, scale)
-    draw_text(cx - w // 2, y, s, scale, c)
+def draw_center(cv, y, s, col, scale=1, cx0=0, cx1=W):
+    w = text_w(s, scale)
+    draw_text(cv, cx0 + (cx1 - cx0 - w) // 2, y, s, col, scale)
 
 
 def wrap(s, max_chars):
-    """Greedy word wrap to a list of lines, each <= max_chars."""
-    lines = []
-    for para in s.split('\n'):
-        words = para.split(' ')
-        cur = ''
-        for wd in words:
-            if not cur:
-                cur = wd
-            elif len(cur) + 1 + len(wd) <= max_chars:
-                cur = cur + ' ' + wd
-            else:
-                lines.append(cur)
-                cur = wd
-        if cur:
+    words = s.split()
+    lines, cur = [], ""
+    for wd in words:
+        if not cur:
+            cur = wd
+        elif len(cur) + 1 + len(wd) <= max_chars:
+            cur += " " + wd
+        else:
             lines.append(cur)
+            cur = wd
+    if cur:
+        lines.append(cur)
     return lines
 
 
-def draw_wrapped(x, y, s, scale, c, max_chars, line_h=None):
-    if line_h is None:
-        line_h = 8 * scale + 1
-    yy = y
-    for ln in wrap(s, max_chars):
-        draw_text(x, yy, ln, scale, c)
-        yy += line_h
-    return yy
+def draw_para(cv, x, y, s, col, scale, max_chars, lh):
+    lines = wrap(s, max_chars)
+    for i, ln in enumerate(lines):
+        draw_text(cv, x, y + i * lh, ln, col, scale)
+    return y + len(lines) * lh
 
 
-# ---------------------------------------------------------------- PNG (stdlib only)
-def _chunk(tag, data):
-    out = struct.pack('>I', len(data)) + tag + data
-    out += struct.pack('>I', zlib.crc32(tag + data) & 0xFFFFFFFF)
-    return out
-
-
-def png_bytes():
-    ihdr = struct.pack('>IIBBBBB', W, H, 8, 2, 0, 0, 0)
-    raw = bytearray()
-    stride = W * 3
-    for yy in range(H):
-        raw.append(0)
-        raw += buf[yy * stride:(yy + 1) * stride]
-    idat = zlib.compress(bytes(raw), 9)
-    return (b'\x89PNG\r\n\x1a\n'
-            + _chunk(b'IHDR', ihdr)
-            + _chunk(b'IDAT', idat)
-            + _chunk(b'IEND', b''))
-
-# ---------------------------------------------------------------- data
-# Every item was first reported on Saturday 21 November 2026 (UTC),
-# in the Saturday wires (AP, Reuters, BBC, CNN, AFP, USGS, ESA, Schwab,
-# Arab News, GMA, HT, NY Post). Friday-close markets and Friday-night
-# events appear as carried in Saturday's editions. Items dated any other
-# day were excluded. See DATE CHECK in the footer.
-
+# ---------------- DATA: verified live, Saturday 21 November 2026 ----------------
 HEROES = [
     ("CLIMATE - ANTALYA, TURKIYE",
-     "COP31 IN OVERTIME",
-     "Fossil-fuel fight deadlocks talks past deadline; revised draft drops "
-     "every mention of fossil fuels. Nearly 200 nations still split on finance."),
-    ("MIDDLE EAST - RIYADH",
-     "MISSILES OVER RIYADH",
-     "Saudi defences intercept 3 Houthi ballistic missiles aimed at the "
-     "capital, more over Jazan - the third straight night of attacks."),
-    ("MARKETS - NEW YORK",
-     "WALL ST ROUT",
-     "S&P -3.7%, Nasdaq -5.3% in the worst week since April 2025. Nasdaq "
-     "wipes out its 2026 gains; Nvidia sinks 14% in a day."),
+     "COP31 IN OVERTIME AS FOSSIL FUEL FIGHT SPLITS 200 NATIONS",
+     "EU: GOOD DEAL OR NO DEAL. DRAFT STRIPS FOSSIL FUEL WORDING AND DROPS "
+     "$120BN ADAPTATION TARGET. FRANCE AND PANAMA LEAD A CROSS-BLOC REVOLT; "
+     "FIRST DRAFT TO ADMIT 1.5C OVERSHOOT."),
+    ("WAR - KYIV, UKRAINE",
+     "RUSSIA RENEWS MASS STRIKES AS TRUMP-XI-PUTIN TALK PEACE",
+     "148 DRONES AND 3 MISSILES OVERNIGHT INTO SATURDAY; BOY, 7, AND A "
+     "PARAMEDIC KILLED IN KRYVYI RIH. FRIDAY'S 10-HOUR RAID FIRED 110+ "
+     "MISSILES, HIT 3 KYIV BRIDGES; 2 MISSILES LANDED IN POLAND."),
+    ("MARKETS - WALL STREET",
+     "AI ROUT DEEPENS: NASDAQ -5.28%, S&P IN CORRECTION",
+     "NVIDIA -14% TO $125.53 ON SEC PROBE REPORT; $2.7TN GONE FROM ITS "
+     "PEAK. GOLD $3,539 IN WORST WEEK SINCE MARCH; BITCOIN BELOW $60,000."),
 ]
 
-MARKETS = [
-    ("S&P 500", "6,910.39", "-3.70%"),
-    ("NASDAQ", "22,617.73", "-5.28%"),
-    ("DOW", "48,147.33", "-1.93%"),
-    ("GOLD", "~$3,540", "-4.4%"),
-    ("BITCOIN", "~$59,000", "LOWEST SINCE JUNE"),
-    ("NVIDIA", "-14% DAY", "7TH WKLY LOSS"),
-    ("ANTHROPIC", "~$89", "-9.1%  IPO $83"),
-    ("TAIWAN TAIEX", "WORST WEEK", "SINCE 1990"),
+# (place, headline) - each renders as one line: "PLACE - HEADLINE"
+COL1 = [
+    ("KYIV", "RUSSIA FIRES 148 DRONES, 3 MISSILES OVERNIGHT"),
+    ("KRYVYI RIH", "BOY, 7, AND PARAMEDIC KILLED IN STRIKE"),
+    ("KRYVYI RIH", "58 INJURED AS MISSILES HIT HOMES"),
+    ("KYIV", "FIRES IN PODIL HOMES AFTER OVERNIGHT STRIKES"),
+    ("KYIV", "FRIDAY: 110+ MISSILES, 400+ DRONES"),
+    ("KYIV", "ZELENSKYY: FRIDAY RAID THE BIGGEST THIS YEAR"),
+    ("KYIV", "3 BRIDGES HIT; DNIPRO TRAFFIC HALTED"),
+    ("KYIV", "POWER OUT IN 11 REGIONS AS GRID IS POUNDED"),
+    ("KYIV", "NUCLEAR PLANTS CUT OUTPUT AFTER GRID STRIKES"),
+    ("KYIV", "27 OF FRIDAY'S MISSILES WERE BALLISTIC"),
+    ("KYIV", "120 JET DRONES IN FRIDAY'S 400-DRONE SWARM"),
+    ("KYIV", "WAVES 20-30 MIN APART TO SLOW RESCUE WORK"),
+    ("KHARKIV", "HOSPITAL AMONG TARGETS IN FRIDAY'S RAID"),
+    ("LVIV", "2 KILLED AT RAILWAY STATION IN LVIV"),
+    ("TATARSTAN", "KYIV HITS DRUZHBA OIL PUMP STATION"),
+    ("SHENZHEN", "TRUMP-XI-PUTIN TRILATERAL BILLS PEACE BID"),
+    ("SHENZHEN", "TRUMP REPORTEDLY CALLS PUTIN TIRED"),
+    ("KYIV", "ZELENSKYY: PUTIN IS A KILLER"),
+    ("POLAND", "2 RUSSIAN MISSILES, 1 DRONE LAND IN POLAND"),
+    ("POLAND", "MISSILES FALL AT NOWY LIPOWIEC, RUDNIK"),
+    ("POLAND", "WARSAW: TIMING DURING DRILLS NO ACCIDENT"),
+    ("BRUSSELS", "UK, EU SIGN 3 POST-BREXIT DEALS"),
+    ("BRUSSELS", "DEALS COVER FOOD, CARBON, YOUTH MOBILITY"),
+    ("ANTALYA", "COP31 IN OVERTIME; NO NEW TEXT BY SATURDAY"),
+    ("ANTALYA", "DRAFT STRIPS ALL FOSSIL FUEL REFERENCES"),
+    ("ANTALYA", "$120BN ADAPTATION TARGET DROPPED"),
+    ("ANTALYA", "DRAFT FIRST TO ADMIT 1.5C OVERSHOOT LIKELY"),
+    ("ANTALYA", "FRANCE, PANAMA LEAD STRONGER DEAL CALL"),
+    ("ANTALYA", "GUTERRES: SPEED SHIFT FROM FOSSIL FUELS"),
+    ("ANTALYA", "ELECTRICITY GOAL: 35% SHARE BY 2035 KEPT"),
+    ("ANTALYA", "NGOS CALL DRAFT WORST COP EVER"),
+    ("ANTALYA", "KURUM MEETS EU, AUSTRALIA, SAUDI TO UNLOCK"),
+    ("ANTALYA", "HOEKSTRA: GOOD DEAL OR NO DEAL"),
+    ("ANTALYA", "NEARLY 200 NATIONS SPLIT ON FINANCE"),
+    ("ANTALYA", "BUSINESS: 123 FIRMS URGE AMBITIOUS DEAL"),
+    ("ANTALYA", "PANAMA WARNS IT MAY BLOCK WEAK DEAL"),
+    ("ROME", "ITALY: WORKERS, STUDENTS STRIKE OVER COSTS"),
+    ("PARIS", "FRANCE JOINS COP31 REBEL BLOC"),
+    ("MADRID", "SPAIN BACKS FOSSIL FUEL LANGUAGE"),
+    ("HELSINKI", "FINLAND IN CROSS-BLOC CLIMATE PUSH"),
+    ("STOCKHOLM", "SWEDEN JOINS DEMAND FOR STRONGER TEXT"),
+    ("ATHENS", "GREECE SIGNS JOINT CLIMATE DEMAND"),
 ]
 
-# (region tag, headline) - main grid, 61 items
-STORIES = [
-    ("UKRAINE", "Russian missile hits Kryvyi Rih, Zelenskyy's hometown: 2 killed, 60 wounded."),
-    ("UKRAINE", "Zelenskyy: Crimean Bridge strikes a 'fair response' after 109 Russian attacks on bridges."),
-    ("UKRAINE", "Zelenskyy calls Putin a 'killer' after Trump calls the Russian leader a friend."),
-    ("UKRAINE", "UK defence chief Streeting meets Zelenskyy in Kyiv; calls Putin a 'cold-blooded killer'."),
-    ("RUSSIA", "Russian missile hits Poland as Kyiv's allies hold a military exercise, PM Tusk says."),
-    ("DENMARK", "Denmark accuses Russia of plotting to kill rapper Kyivstoner; expels defence attache."),
-    ("CHINA", "Trump, Xi and Putin end Shenzhen talks with nuclear-risk and energy pledges; no breakthrough."),
-    ("CHINA", "Leaders issue joint declaration of peace after historic 90-minute trilateral at APEC Shenzhen."),
-    ("TURKIYE", "COP31 in overtime: fossil-fuel fight deadlocks Antalya talks; draft drops fossil fuels."),
-    ("TURKIYE", "COP31: China-Turkiye sign $15bn renewables deal; AIIB pledges $1.6bn climate finance."),
-    ("SAUDI ARABIA", "Saudi defences intercept 3 Houthi ballistic missiles aimed at Riyadh, more over Jazan."),
-    ("YEMEN", "'I tell my son it's just fireworks': life inside a Houthi-besieged Yemeni city."),
-    ("GAZA", "Israeli strikes kill 6 in Gaza on Friday, medics say."),
-    ("LEBANON", "UNIFIL logs extensive Israeli violations in south Lebanon in October: thousands of shells."),
-    ("IRAN", "FM Araqchi: Iran seeks a diplomatic solution but will not give up domestic uranium enrichment."),
-    ("IRAN", "Trump calls for a 'real deal' as US pledges continued economic pressure on Tehran."),
-    ("IRAN", "Revolutionary Guard claims it shot down 2 US drones over the Strait of Hormuz; unverified."),
-    ("MEXICO", "FBI most-wanted cartel boss 'Chapo Isidro' captured in Guasave, Sinaloa; gun battles follow."),
-    ("MEXICO", "Two more cartel leaders detained in the same raid; FBI had offered a $5m bounty."),
-    ("PERU", "M6.7 quake strikes the central Andes near Carhuamayo at 00:09 UTC; felt in Lima, no deaths."),
-    ("INDIA", "PM Modi in Bihar to open the Nitish Setu bridge; visits IIT Kharagpur."),
-    ("INDIA", "Cyclone Akvan to bring heavy rain; Ladakh panchayat polls held."),
-    ("INDIA", "Rahul Gandhi attacks the government's economic policy at Columbia SIPA."),
-    ("INDIA", "UP chief minister Yogi Adityanath's mother cremated; funeral held on Saturday."),
-    ("NEPAL", "PM Balendra Shah faces his India test on a first visit."),
-    ("PAKISTAN", "Pakistan beats Sri Lanka to win a first Test series in two years."),
-    ("BANGLADESH", "Garment worker protests flare in Dhaka."),
-    ("PHILIPPINES", "Duterte camp asks the ICC to reject an ex-Davao cop's recorded testimony."),
-    ("PHILIPPINES", "Air Niugini jet makes an emergency landing at Davao airport."),
-    ("PHILIPPINES", "Naga City votes in a plebiscite on highly urbanized city status."),
-    ("PHILIPPINES", "PhilSA warns of Chinese rocket debris in Philippine waters."),
-    ("SOUTH AFRICA", "ANC fights to keep control of key cities after an election setback."),
-    ("SOUTH AFRICA", "Nearly 600 women killed within three months, police data shows."),
-    ("UK", "New UK-EU deal does not depend on a tuition-fees agreement, Miliband says."),
-    ("UK", "Burnham: UK to explore even closer ties with the EU after the deal."),
-    ("UK", "EU-UK youth scheme: ages 18-31 may travel, work or study for up to 3 years."),
-    ("UK", "Coldest night of autumn so far; cold alerts in force across Britain."),
-    ("UK", "Trafalgar Square Christmas tree felled in Norway for London."),
-    ("UK", "Catherine speaks openly about how cancer changed her in a BBC documentary."),
-    ("USA", "FBI probes apparent hack of its NCIC crime database; USDA also reportedly hit."),
-    ("USA", "Mamdani unveils a plan to close New York's Rikers Island jail by 2032."),
-    ("USA", "Man convicted of starting the Palisades fire in Los Angeles."),
-    ("USA", "US declassifies more UFO footage filmed in the Middle East."),
-    ("USA", "Nikhil Gupta sentenced to 19+ years in a plot to kill Sikh leader Pannun in New York."),
-    ("USA", "Asif Merchant gets 27 years for a Trump murder plot."),
-    ("USA", "Florida pastor convicted in the plot to kill Haiti's President Moise."),
-    ("USA", "Justice Dept seizes $1.2bn in crypto stolen from Binance."),
-    ("USA", "Virginia reports the first measles-related child death of 2026; 290 cases this year."),
-    ("USA", "Congress faces a possible shutdown before Christmas over funding and defence rows."),
-    ("USA", "Federal judge rejects a long-term ban on Trump administration political ads."),
-    ("USA", "DEA shuts the first known nitazene lab in the US, in Baton Rouge, Louisiana."),
-    ("USA", "US soldier arrested in England on suspicion of spying for Russia."),
-    ("FRANCE", "French police officers sentenced for beating music producer Michel Zecler."),
-    ("FRANCE", "France seeks arrest warrants over an Iran-blamed fridge hack."),
-    ("FRANCE", "Gerard Depardieu and a French author investigated over sexual allegations."),
-    ("SUDAN", "Ex-official Ahmed Haroun, wanted by the ICC, arrested."),
-    ("EL SALVADOR", "Salvadoran soldiers killed in an attack, officials say."),
-    ("SPACE", "BepiColombo enters Mercury orbit at 19:24 CET after an 8-year ESA/JAXA journey."),
-    ("SPACE", "BepiColombo's two orbiters, MPO and Mio, to split in December; science starts in April."),
-    ("JAPAN", "Sagawa Express data leak reported."),
-    ("JAPAN", "KKR in talks over CoCo Ichibanya."),
+COL2 = [
+    ("RIYADH", "3 HOUTHI MISSILES TOWARD RIYADH DOWNED"),
+    ("RIYADH", "SECOND CAPITAL ATTACK IN DAYS"),
+    ("RIYADH", "PIF TOWER, CITY'S TALLEST, HIT THURSDAY"),
+    ("RIYADH", "THURSDAY TOWER STRIKE: DAMAGE, NO INJURIES"),
+    ("JAZAN", "2 MISSILES TOWARD JAZAN STOPPED FRIDAY"),
+    ("RIYADH", "HOUTHI DRONE TO SOUTHERN REGION DESTROYED"),
+    ("HODEIDAH", "COALITION STRIKES HODEIDAH PORT IN REPLY"),
+    ("HORMUZ", "2 TANKERS HIT BY UNKNOWN PROJECTILES"),
+    ("HORMUZ", "UKMTO REPORTS TWIN TANKER ATTACKS"),
+    ("HORMUZ", "REPORT: IRAN CLAIMS MISSILE HIT US F-16"),
+    ("HORMUZ", "OIL VIA HORMUZ FALLS AS STRIKES RISE"),
+    ("JURF AL-SAKHAR", "IRAQ, HEZBOLLAH AGREE JOINT POST"),
+    ("JURF AL-NASR", "IRAQI FORCES IN TOWN, 1ST IN 12 YRS"),
+    ("BAGHDAD", "KATAIB HEZBOLLAH STANDS FIGHTERS DOWN"),
+    ("BEIRUT", "US IN TALKS ON LEBANON VERIFICATION FORCE"),
+    ("SANA'A", "HOUTHIS THREATEN MAJOR ESCALATION"),
+    ("RIYADH", "AIR ALERTS SOUNDED TWICE BEFORE DAWN"),
+    ("JEDDAH", "COALITION SAYS 60 HOUTHI TARGETS HIT"),
+    ("KINSHASA", "DR CONGO EBOLA HITS CHILDREN HARDEST"),
+    ("ABIDJAN", "COTE D'IVOIRE JOINS COP31 REBEL BLOC"),
+    ("PORT VILA", "VANUATU DEMANDS FOSSIL FUEL LANGUAGE"),
+    ("GUATEMALA CITY", "GUATEMALA IN CLIMATE PUSH"),
+    ("PANAMA CITY", "PANAMA LEADS COP31 FOSSIL FUEL FIGHT"),
+    ("MOGADISHU", "UAE BUILDUP AT SOMALI AIRFIELDS: REPORT"),
+    ("GOPALPUR", "CYCLONE AKVAN LANDFALL: WINDS 70-80 KMPH"),
+    ("GOPALPUR", "370,000 EVACUATED; 423 RESCUE TEAMS OUT"),
+    ("ODISHA", "9,341 CYCLONE SHELTERS OPENED IN ODISHA"),
+    ("ODISHA", "NO MAJOR DAMAGE REPORTED, MINISTER SAYS"),
+    ("ODISHA", "AKVAN: 3RD CYCLONE IN 24 DAYS"),
+    ("ODISHA", "HEAVY RAIN OVER SOUTH BENGAL TILL SATURDAY"),
+    ("ODISHA", "AKVAN NAME SUGGESTED BY IRAN"),
+    ("NEW DELHI", "IMD: AKVAN WEAKENS TO DEEP DEPRESSION"),
+    ("BEIJING", "CHINA HOSTS SHENZHEN TRILATERAL SUMMIT"),
+    ("TOKYO", "JAXA'S MIO TO PROBE MERCURY MAGNETOSPHERE"),
+    ("CANBERRA", "AUSTRALIA CO-CHAIRS COP31 TALKS"),
+    ("DHAKA", "VIOLENCE AHEAD OF HASINA RETURN"),
+    ("ISLAMABAD", "PAKISTAN POSTS $39M SURPLUS"),
+    ("KARACHI", "RUPEE CLOSES AT 276.51 PER DOLLAR"),
+    ("JAKARTA", "RUPIAH AT RECORD LOW NEAR 18,270 PER $"),
+    ("ANKARA", "KURUM CHAIRS COP31 PRESIDENCY"),
 ]
 
-# (region tag, one-line headline) - brief band, 54 items
-BRIEF = [
-    ("SPORT", "Harden 51 pts; Cavs 128-119, passes Kobe"),
-    ("SPORT", "Verstappen on pole in Vegas; Antonelli fastest"),
-    ("SPORT", "India 486-4, lead NZ by 118; Rahul 136"),
-    ("SPORT", "England record rugby win over New Zealand"),
-    ("SPORT", "Wales beat All Blacks, first time in 73 yrs"),
-    ("SPORT", "Chaudhary downs England in tetchy first T20"),
-    ("SPORT", "Cummins keeps Australia Test captaincy"),
-    ("SPORT", "Lehmann again denies sandpapergate knowledge"),
-    ("SPORT", "India A beat Nepal by 306 runs; Nepal 26"),
-    ("SPORT", "Kane tears ankle ligament, out for months"),
-    ("SPORT", "Ronaldo scores 986th goal, misses penalty"),
-    ("SPORT", "Pochettino set for Man Utd debut vs Liverpool"),
-    ("SPORT", "ATP Finals semis; Andreeva wins WTA Finals"),
-    ("SPORT", "Drake Maye out for season, fractured fibula"),
-    ("SPORT", "Cade Cunningham posts historic 50-pt game"),
-    ("SPORT", "Raptors upset Pistons"),
-    ("SPORT", "Stars beat Golden Knights 4-3 in shootout"),
-    ("SPORT", "F1 to return to V8 power in 2030"),
-    ("SPORT", "Jon Henricks, 1956 swim champ, dies at 91"),
-    ("SPORT", "England call up McKinney for SA Tests"),
-    ("SPORT", "Khawaja in ball-tampering dispute"),
-    ("SPORT", "Yankees release Gil"),
-    ("CULTURE", "GTA VI: $3.79bn day one, biggest launch ever"),
-    ("CULTURE", "GTA VI: Sensor Tower puts it at $2.36bn"),
-    ("CULTURE", "'Sunrise on the Reaping' takes $51m Friday"),
-    ("CULTURE", "'Wicked: For Good' opens, tracking $125m"),
-    ("CULTURE", "Holmes documentary crosses $100m worldwide"),
-    ("CULTURE", "Olivia Rodrigo's 'Stupid Song' hits No.1"),
-    ("CULTURE", "Taylor Swift named Intl Artist of the Year"),
-    ("CULTURE", "CMA Awards ratings reported"),
-    ("CULTURE", "Culkin returns for new 'Home Alone' sequel"),
-    ("CULTURE", "GTA VI cast revealed: Rourke is Jason"),
-    ("TECH", "Anthropic slides after record IPO; AI unwinds"),
-    ("TECH", "Microsoft retiring To Do app"),
-    ("TECH", "Trump threatens ban on US AI centres abroad"),
-    ("TECH", "Mitsui Shopping Park app pulled"),
-    ("TECH", "CVN-81 carrier keeps Doris Miller's name"),
-    ("TECH", "US Army pauses Iowa chemical detonation"),
-    ("HEALTH", "US loses measles-free status as cases surge"),
-    ("HEALTH", "Thanksgiving dinner costs higher this year"),
-    ("WEATHER", "Fukushima snow outage reported"),
-    ("UK", "Scouts face 1M GBP tourist tax on trips"),
-    ("USA", "Democrats nominate Hakeem Jeffries for Speaker"),
-    ("USA", "Congress resists $50bn air-travel rebuild plea"),
-    ("USA", "Sarah McBride elected to leadership"),
-    ("USA", "Ken Paxton drops lawsuits"),
-    ("USA", "Tulip Siddiq takes legal action"),
-    ("USA", "Chicago: mayor ballot fight; CFO resigns"),
-    ("USA", "Two shot dead in Chicago's Noble Square"),
-    ("PHILIPPINES", "Michelle Dee quits MGI All Stars"),
-    ("PHILIPPINES", "DOTr eyes barrier-less tollways pilot"),
-    ("INDIA", "Amit Shah on Siang Dam dialogue"),
-    ("INDIA", "MEA clears Pakistani delegation's Taj visit"),
-    ("EUROPE", "Cost-of-living protests sweep across Europe"),
+COL3 = [
+    ("LIMA", "M6.7 QUAKE SHAKES CENTRAL PERU, FELT IN LIMA"),
+    ("CARHUAMAYO", "QUAKE 9KM NE OF CARHUAMAYO, 108KM DEEP"),
+    ("LIMA", "NO CASUALTIES REPORTED AFTER ANDEAN QUAKE"),
+    ("LIMA", "RESIDENTS RUSH INTO STREETS AT 7:09 PM"),
+    ("LIMA", "USGS GREEN ALERT: LITTLE DAMAGE EXPECTED"),
+    ("LIMA", "M5.0 AFTERSHOCK FOLLOWS WITHIN HOURS"),
+    ("WASHINGTON", "TRUMP DEFENDS PUTIN TIES IN SHENZHEN"),
+    ("NEW YORK", "S&P 500 -3.7% TO 6,910, 7TH STRAIGHT LOSS"),
+    ("NEW YORK", "NASDAQ -5.28%, WIPES OUT 2026 GAINS"),
+    ("NEW YORK", "DOW -1.93% TO 48,147, DOWN 950 POINTS"),
+    ("NEW YORK", "NVIDIA -14% TO $125.53 ON SEC PROBE"),
+    ("NEW YORK", "NVIDIA LOSES $2.7TN FROM OCTOBER PEAK"),
+    ("NEW YORK", "ANTHROPIC -8.5% DAY AFTER IPO"),
+    ("NEW YORK", "BROADCOM -12%, AMD -13%, MICRON -14%"),
+    ("NEW YORK", "VIX FEAR GAUGE JUMPS 41% TO 40"),
+    ("NEW YORK", "S&P, DOW IN CORRECTION, 10% OFF RECORDS"),
+    ("NEW YORK", "NASDAQ'S WORST WEEK SINCE 2020, -10%"),
+    ("NEW YORK", "GOLD $3,539, WORST WEEK SINCE MARCH"),
+    ("NEW YORK", "SILVER $41.08, DOWN 15.6% ON THE WEEK"),
+    ("NEW YORK", "BRENT $92.49; WTI $84.10"),
+    ("NEW YORK", "BITCOIN BELOW $60,000, 1ST SINCE JULY"),
+    ("NEW YORK", "BITCOIN ~$59,000, LOWEST SINCE JUNE"),
+    ("NEW YORK", "ETHEREUM ~$1,560, DOWN 17.8% ON WEEK"),
+    ("NEW YORK", "$2BN LEVERAGED POSITIONS LIQUIDATED"),
+    ("NEW YORK", "HUANG QUIT AS NVIDIA CEO ON NOV 12"),
+    ("MERCURY", "BEPICOLOMBO ENTERS MERCURY ORBIT TODAY"),
+    ("MERCURY", "8-YEAR VOYAGE ENDS AT INNERMOST PLANET"),
+    ("MERCURY", "TWIN ORBITERS IN 590 X 11,640KM ORBIT"),
+    ("MERCURY", "MPO, MIO SEPARATE ON 9-10 DECEMBER"),
+    ("MERCURY", "SCIENCE PHASE BEGINS APRIL 2027"),
+    ("MERCURY", "SECOND-EVER SPACECRAFT TO ORBIT MERCURY"),
+    ("MERCURY", "LAUNCHED OCT 2018; NINE FLYBYS EN ROUTE"),
+    ("TURIN", "ALCARAZ BEATS SHELTON 3-6, 6-3, 7-6(1)"),
+    ("TURIN", "ALCARAZ INTO 2ND STRAIGHT ATP FINALS FINAL"),
+    ("TURIN", "WIN STREAK NOW 13 AFTER VIENNA, PARIS"),
+    ("TURIN", "FINAL SUNDAY VS ZVEREV OR MEDVEDEV"),
+    ("TURIN", "SINNER OUT OF TURIN WITH KNEE INJURY"),
+    ("CLEVELAND", "HARDEN 51 AS CAVS BEAT PACERS 128-119"),
+    ("CLEVELAND", "HARDEN PASSES KOBE: 26TH 50-POINT GAME"),
+    ("CLEVELAND", "HARDEN 15-26 FG, 7-11 3PT, 14-14 FT"),
+    ("ATLANTA", "HAWKS 111, HORNETS 97 IN CUP PLAY"),
+    ("ORLANDO", "MAGIC 113, NETS 111"),
+    ("TORONTO", "RAPTORS 105, PISTONS 102"),
+    ("OKLAHOMA CITY", "THUNDER 126, PELICANS 120"),
+    ("DENVER", "NUGGETS 133, ROCKETS 124"),
+    ("LOS ANGELES", "LAKERS 106, KINGS 104"),
+    ("WASHINGTON", "WIZARDS 98, BULLS 94"),
+    ("PHOENIX", "SUNS 111, JAZZ 101"),
+]
+
+NUMBERS = [
+    ("S&P 500", "6,910", "-3.70%"),
+    ("NASDAQ", "22,618", "-5.28%"),
+    ("DOW", "48,147", "-1.93%"),
+    ("NVIDIA", "$125.53", "-14.0%"),
+    ("GOLD", "$3,539", "-4.0%"),
+    ("BRENT", "$92.49", "-3.8% WK"),
+    ("BITCOIN", "~$59K", "BELOW $60K"),
+    ("VIX", "40", "+41%"),
 ]
 
 TIMELINE = [
-    ("00:09 UTC", "M6.7 quake in central Peru; felt in Lima"),
-    ("MORNING", "3 Houthi missiles downed over Riyadh"),
-    ("08:00 UTC", "GTA VI at $2.36bn, 24.58m copies"),
-    ("DAY", "COP31 talks run past deadline in Antalya"),
-    ("18:24 UTC", "BepiColombo enters Mercury orbit"),
-    ("EVENING", "Cartel boss 'Chapo Isidro' captured"),
+    ("00:09 UTC", "M6.7 QUAKE STRIKES CENTRAL PERU"),
+    ("02:00 UTC", "CYCLONE AKVAN MAKES LANDFALL, GOPALPUR"),
+    ("EARLY SAT", "3 HOUTHI MISSILES DOWNED OVER RIYADH"),
+    ("MORNING", "COP31 TALKS MISS DEADLINE, GO OVERTIME"),
+    ("AFTERNOON", "HOEKSTRA: GOOD DEAL OR NO DEAL"),
+    ("EVENING", "ALCARAZ WINS TURIN SEMI IN 3 SETS"),
 ]
 
-QUOTE = '"Putin is a killer." - Zelenskyy, Kyiv, 21 Nov (BBC)'
+QUOTE = ("PUTIN IS A KILLER", "VOLODYMYR ZELENSKYY, PRESIDENT OF UKRAINE - SATURDAY")
 
-NON_REGIONS = {"SPORT", "CULTURE", "TECH", "HEALTH", "WEATHER", "SPACE"}
+DATE_CHECK = (
+    "DATE CHECK: EVERY STORY IS DATED SAT 21 NOV 2026 OR REPORTS THE FRIDAY "
+    "CLOSE IT NAMES. DELIBERATELY EXCLUDED AS OTHER DAYS: ICJ MYANMAR RULING "
+    "(19 NOV) - US-VENEZUELA MILITARY TIES (18 NOV) - SOUTH SUDAN VOTE DELAY "
+    "(18 NOV) - UK SETTLEMENT SANCTIONS (18 NOV) - GAZA BOARD OF PEACE "
+    "WARNING (18 NOV) - ANTHROPIC IPO DEBUT (19 NOV)."
+)
 
-
-def count_stories():
-    return len(STORIES) + len(BRIEF) + len(MARKETS)
-
-
-def count_regions():
-    tags = []
-    for tag, _ in STORIES + BRIEF:
-        if tag not in NON_REGIONS and tag not in tags:
-            tags.append(tag)
-    return len(tags), tags
+SOURCES = ("SOURCES: AP - REUTERS - BBC - CNN - AFP - USGS - ESA - ATP TOUR - "
+           "IMD - UN NEWS - ALL CHECKED 21 NOV 2026")
 
 
-def region_tally():
-    counts = {}
-    order = []
-    for tag, _ in STORIES + BRIEF:
-        if tag in NON_REGIONS:
-            continue
-        if tag not in counts:
-            counts[tag] = 0
-            order.append(tag)
-        counts[tag] += 1
-    ranked = sorted(order, key=lambda t: (-counts[t], t))
-    return [(t, counts[t]) for t in ranked]
-
-# ---------------------------------------------------------------- layout
-MX = 16            # margin
-CW = 992           # content width
-COLW = 322         # column width
-COLX = [16, 352, 688]
+# ---------------- LAYOUT ----------------
+def draw_masthead(cv):
+    cv.hline(0, 4, W, INK, 3)
+    draw_center(cv, 10, "THE WORLD", INK, 8)
+    draw_text(cv, 16, 34, "EST. MMXXVI", GREY, 1)
+    draw_text(cv, W - 16 - text_w("SATURDAY EDITION", 1), 34,
+              "SATURDAY EDITION", GREY, 1)
+    cv.hline(16, 70, W - 32, INK, 2)
+    draw_center(cv, 76, "SATURDAY, 21 NOVEMBER 2026", INK, 2)
+    cv.hline(16, 94, W - 32, INK, 2)
 
 
-def section_bar(y, title, right=""):
-    rect(MX, y, CW, 18, INK)
-    draw_text(MX + 6, y + 5, title, 1, PAPER)
-    if right:
-        w = text_width(right, 1)
-        draw_text(MX + CW - 6 - w, y + 5, right, 1, PAPER)
-    return y + 18
+def draw_ticker(cv):
+    cv.rect(0, 100, W, 20, NAVY)
+    tick = ("MARKETS AT THE FRIDAY CLOSE: S&P 500 -3.70% TO 6,910 - NASDAQ "
+            "-5.28% TO 22,618 - DOW -1.93% TO 48,147 - NVIDIA -14% - GOLD "
+            "$3,539 - BITCOIN BELOW $60,000")
+    draw_text(cv, 12, 106, tick, CREAM, 1)
 
 
-def draw_masthead(n_stories, n_regions):
-    # top rules
-    hline(MX, 6, CW, INK, 2)
-    draw_text_center(512, 14, "THE WORLD", 9, INK)
-    # side ornaments
-    draw_text(MX + 2, 30, "EST.", 1, SOFT)
-    draw_text(MX + 2, 40, "MMXXVI", 1, SOFT)
-    draw_text(MX + CW - 44, 30, "No. 325", 1, SOFT)
-    draw_text(MX + CW - 44, 40, "SAT EDN", 1, SOFT)
-    dateline = "SATURDAY, 21 NOVEMBER 2026  |  %d STORIES  -  %d REGIONS  -  ONE DAY" % (
-        n_stories, n_regions)
-    draw_text_center(512, 76, dateline, 1, DARKRED)
-    hline(MX, 90, CW, INK, 2)
-    hline(MX, 93, CW, INK, 1)
+def draw_hero_art(cv, x, y, kind):
+    if kind == 0:  # globe: circle + latitude lines
+        cv.ring(x + 40, y + 16, 15, NAVY)
+        cv.hline(x + 26, y + 16, 28, NAVY, 1)
+        cv.hline(x + 29, y + 9, 22, NAVY, 1)
+        cv.hline(x + 29, y + 23, 22, NAVY, 1)
+        cv.vline(x + 40, y + 2, 28, NAVY, 1)
+        draw_text(cv, x + 64, y + 6, "ANTALYA", GREY, 1)
+        draw_text(cv, x + 64, y + 16, "NEARLY 200", GREY, 1)
+        draw_text(cv, x + 64, y + 26, "NATIONS", GREY, 1)
+    elif kind == 1:  # skyline + alert
+        for i, bh in enumerate((14, 22, 10, 26, 18)):
+            cv.rect(x + i * 14, y + 30 - bh, 10, bh, NAVY)
+        cv.circle(x + 78, y + 8, 4, RED)
+        draw_text(cv, x + 88, y + 4, "KYIV", GREY, 1)
+        draw_text(cv, x + 88, y + 14, "10-HOUR RAID", GREY, 1)
+        draw_text(cv, x + 88, y + 24, "110+ MISSILES", GREY, 1)
+    else:  # falling bars
+        for i, bh in enumerate((26, 22, 18, 12, 8)):
+            cv.rect(x + 8 + i * 13, y + 30 - bh, 9, bh, RED)
+        draw_text(cv, x + 82, y + 4, "NASDAQ", GREY, 1)
+        draw_text(cv, x + 82, y + 14, "-5.28%", RED, 1)
+        draw_text(cv, x + 82, y + 24, "WORST WEEK", GREY, 1)
 
 
-def draw_hero(x, y, w, h, kicker, headline, deck, accent):
-    rect(x, y, w, h, CARD)
-    border(x, y, w, h, INK, 1)
-    rect(x, y, w, 16, accent)
-    draw_text(x + 6, y + 4, kicker, 1, WHITE)
-    # headline, scale 3, wrapped to fit
-    lines = wrap(headline, (w - 12) // 18)
-    yy = y + 22
-    for ln in lines:
-        draw_text(x + 6, yy, ln, 3, INK)
-        yy += 22
-    # red rule under headline
-    hline(x + 6, yy + 1, w - 12, RED, 2)
-    draw_wrapped(x + 6, yy + 7, deck, 1, SOFT, (w - 12) // 6, 9)
+def draw_heroes(cv):
+    xs = (16, 350, 684)
+    for i, (kick, head, deck) in enumerate(HEROES):
+        x = xs[i]
+        draw_text(cv, x, 128, kick, RED, 1)
+        cv.hline(x, 140, 322, GOLD, 2)
+        draw_para(cv, x, 148, head, INK, 2, 26, 16)
+        draw_para(cv, x, 200, deck, INK, 1, 52, 9)
+        draw_hero_art(cv, x, 242, i)
+        if i < 2:
+            cv.vline(x + 334, 128, 144, LIGHT, 1)
+    cv.hline(16, 278, W - 32, INK, 2)
 
 
-def draw_markets(y):
-    draw_text(MX, y, "MARKETS - FRIDAY CLOSE: THE WORST WEEK SINCE APRIL 2025", 1, DARKRED)
-    draw_text(MX + CW - text_width("ALL THREE MAJOR INDEXES IN CORRECTION", 1), y,
-              "ALL THREE MAJOR INDEXES IN CORRECTION", 1, SOFT)
-    chip_w = (CW - 3 * 8) // 4
-    chip_h = 20
-    for i, (label, val, chg) in enumerate(MARKETS):
-        cx = MX + (i % 4) * (chip_w + 8)
-        cy = y + 12 + (i // 4) * (chip_h + 4)
-        rect(cx, cy, chip_w, chip_h, CARD)
-        border(cx, cy, chip_w, chip_h, RULE, 1)
-        draw_text(cx + 5, cy + 3, label, 1, SOFT)
-        draw_text(cx + 5, cy + 11, val, 1, INK)
-        wchg = text_width(chg, 1)
-        draw_text(cx + chip_w - 5 - wchg, cy + 11, chg, 1, RED)
+def draw_numbers(cv):
+    y = 284
+    draw_text(cv, 16, y, "BY THE NUMBERS - FRIDAY CLOSE", RED, 1)
+    y += 12
+    cw, gap = 124, 4
+    for i, (lab, val, chg) in enumerate(NUMBERS):
+        x = 2 + i * (cw + gap)
+        cv.rect(x, y, cw, 44, LIGHT)
+        cv.hline(x, y, cw, GOLD, 2)
+        draw_text(cv, x + 6, y + 5, lab, GREY, 1)
+        draw_text(cv, x + 6, y + 14, val, INK, 2)
+        draw_text(cv, x + 6, y + 30, chg, RED, 1)
+    cv.hline(16, y + 50, W - 32, INK, 2)
 
 
-def draw_main_item(x, y, tag, headline):
-    """One grid item: red tag + headline, exactly 2 lines, 19px tall."""
-    full = tag + ": " + headline
-    lines = wrap(full, COLW // 6)
-    # safety: trim words until it fits in 2 lines
-    while len(lines) > 2:
-        headline = headline.rsplit(" ", 1)[0] + "..."
-        full = tag + ": " + headline
-        lines = wrap(full, COLW // 6)
-    tag_txt = tag + ": "
-    tw = text_width(tag_txt, 1)
-    draw_text(x, y, tag_txt, 1, RED)
-    rest = lines[0][len(tag_txt):]
-    draw_text(x + tw, y, rest, 1, INK)
-    if len(lines) > 1:
-        draw_text(x, y + 9, lines[1], 1, INK)
-    return y + 19
+def draw_column(cv, x, y, sections):
+    for header, items in sections:
+        draw_text(cv, x, y, header, RED, 1)
+        cv.hline(x, y + 7, 322, GOLD, 1)
+        y += 10
+        for place, head in items:
+            line = place + " - " + head
+            if len(line) > 52:
+                line = line[:49] + "..."
+            cv.rect(x, y + 2, 4, 4, RED)
+            draw_text(cv, x + 9, y, line, INK, 1)
+            y += 10
+        y += 1
+    return y
 
 
-def draw_brief_item(x, y, tag, headline):
-    full = tag + ": " + headline
-    if text_width(full, 1) > COLW:
-        # trim headline to fit one line
-        while text_width(full, 1) > COLW and len(headline) > 4:
-            headline = headline[:-4] + "..."
-            full = tag + ": " + headline
-    tag_txt = tag + ": "
-    tw = text_width(tag_txt, 1)
-    draw_text(x, y, tag_txt, 1, RED)
-    draw_text(x + tw, y, full[len(tag_txt):], 1, INK)
-    return y + 8
+def draw_grid(cv):
+    y0 = 350
+    draw_column(cv, 16, y0, [
+        ("UKRAINE - THE WAR", COL1[0:18]),
+        ("POLAND - BRUSSELS", COL1[18:23]),
+        ("COP31 - ANTALYA", COL1[23:36]),
+        ("EUROPE", COL1[36:41]),
+    ])
+    draw_column(cv, 350, y0, [
+        ("MIDDLE EAST", COL2[0:18]),
+        ("AFRICA", COL2[18:24]),
+        ("ASIA - PACIFIC", COL2[24:40]),
+    ])
+    draw_column(cv, 684, y0, [
+        ("AMERICAS", COL3[0:7]),
+        ("MARKETS", COL3[7:25]),
+        ("SPACE", COL3[25:32]),
+        ("SPORT", COL3[32:48]),
+    ])
+    cv.vline(342, y0, 516, LIGHT, 1)
+    cv.vline(676, y0, 516, LIGHT, 1)
+    cv.hline(16, 876, W - 32, INK, 2)
 
 
-def draw_timeline(y):
-    rect(MX, y, CW, 46, LIGHT)
-    border(MX, y, CW, 46, RULE, 1)
-    draw_text(MX + 6, y + 3, "THE DAY IN UTC", 1, BLUE)
-    # timeline dots + labels, two rows of three; trim events to fit the column
-    for i, (t, ev) in enumerate(TIMELINE):
-        col = i % 3
-        row = i // 3
-        tx = MX + 10 + col * 330
-        ty = y + 15 + row * 15
-        rect(tx, ty + 1, 5, 5, RED)
-        ttxt = t + "  "
-        draw_text(tx + 9, ty, ttxt, 1, BLUE)
-        max_ev = (330 - 9 - text_width(ttxt, 1)) // 6
-        while len(ev) > max_ev and len(ev) > 4:
-            ev = ev[:-4] + "..."
-        draw_text(tx + 9 + text_width(ttxt, 1), ty, ev, 1, INK)
-
-
-def draw_tally(y, tally):
-    # join "TAG n" items atomically so no item is split across lines
-    items = ["%s %d" % (t, c) for t, c in tally]
-    lines = []
-    cur = "REGION TALLY:  "
-    for it in items:
-        sep = "" if cur.endswith("  ") else ", "
-        if len(cur) + len(sep) + len(it) <= CW // 6:
-            cur = cur + sep + it
-        else:
-            lines.append(cur)
-            cur = it
-    lines.append(cur)
-    yy = y
-    for ln in lines:
-        draw_text(MX, yy, ln, 1, SOFT)
-        yy += 9
-    return yy
-
-
-def draw_quote(y):
-    rect(MX, y, CW, 24, BLUE)
-    draw_text_center(512, y + 5, QUOTE, 2, WHITE)
-    return y + 24
-
-
-def draw_footer(y, n_stories, n_regions):
-    hline(MX, y, CW, INK, 1)
-    draw_text(MX, y + 5,
-              "DATE CHECK: every item first reported Sat 21 Nov 2026. Friday-close markets and",
-              1, SOFT)
-    draw_text(MX, y + 14,
-              "Friday-night events as carried in Saturday's wires. Items from other dates excluded.",
-              1, SOFT)
-    draw_text(MX, y + 23,
-              "SOURCES: AP - REUTERS - BBC - CNN - AFP - USGS - ESA - SCHWAB - ARAB NEWS - GMA - HT - NY POST",
-              1, SOFT)
-    right = "%d STORIES - %d REGIONS" % (n_stories, n_regions)
-    draw_text(MX + CW - text_width(right, 1), y + 5, right, 1, DARKRED)
-    draw_text(MX + CW - text_width("THE WORLD - 21 NOV 2026", 1), y + 23,
-              "THE WORLD - 21 NOV 2026", 1, DARKRED)
+def draw_bottom(cv, n_stories, n_places):
+    y = 882
+    draw_text(cv, 16, y, "THE DAY IN UTC", RED, 1)
+    y += 13
+    for row in range(2):
+        for col in range(3):
+            t, txt = TIMELINE[row * 3 + col]
+            x = 16 + col * 338
+            draw_text(cv, x, y, t, RED, 1)
+            draw_text(cv, x, y + 9, txt, INK, 1)
+        y += 22
+    cv.hline(16, y + 2, W - 32, GOLD, 1)
+    draw_center(cv, y + 8, '"' + QUOTE[0] + '"', INK, 2)
+    draw_center(cv, y + 24, QUOTE[1], GREY, 1)
+    cv.hline(16, y + 34, W - 32, INK, 1)
+    fy = y + 40
+    fy = draw_para(cv, 16, fy, DATE_CHECK, INK, 1, 165, 9)
+    fy = draw_para(cv, 16, fy + 3, SOURCES, GREY, 1, 165, 9)
+    draw_center(cv, fy + 4,
+                "%d STORIES - %d PLACES - 1 DAY - THE WORLD" % (n_stories, n_places),
+                RED, 1)
 
 
 def build():
-    n_stories = count_stories()
-    n_regions, _tags = count_regions()
-    tally = region_tally()
-    fill(PAPER)
-
-    draw_masthead(n_stories, n_regions)
-
-    # hero row
-    hy, hh = 100, 116
-    accents = [DARKRED, BLUE, GOLD]
-    for i, (kicker, head, deck) in enumerate(HEROES):
-        draw_hero(COLX[i], hy, COLW, hh, kicker, head, deck, accents[i])
-
-    # markets strip
-    draw_markets(224)
-
-    # main grid
-    y = section_bar(288, "THE WORLD IN BRIEF - TOP STORIES",
-                    "%d STORIES" % len(STORIES))
-    gy = y + 6
-    per_col = (len(STORIES) + 2) // 3
-    for ci in range(3):
-        yy = gy
-        for item in STORIES[ci * per_col:(ci + 1) * per_col]:
-            yy = draw_main_item(COLX[ci], yy, item[0], item[1])
-    grid_bottom = gy + per_col * 19
-
-    # brief band
-    y = section_bar(grid_bottom + 6, "THE DAY IN BRIEF - SPORT, CULTURE, TECH & MORE",
-                    "%d ITEMS" % len(BRIEF))
-    by = y + 5
-    per_col_b = (len(BRIEF) + 2) // 3
-    for ci in range(3):
-        yy = by
-        for item in BRIEF[ci * per_col_b:(ci + 1) * per_col_b]:
-            yy = draw_brief_item(COLX[ci], yy, item[0], item[1])
-    brief_bottom = by + per_col_b * 8
-
-    # timeline, tally, quote, footer
-    ty = brief_bottom + 6
-    draw_timeline(ty)
-    ty2 = draw_tally(ty + 52, tally)
-    qy = draw_quote(ty2 + 4)
-    draw_footer(qy + 4, n_stories, n_regions)
-
-    return n_stories, n_regions
+    cv = Canvas(W, H, PAPER)
+    draw_masthead(cv)
+    draw_ticker(cv)
+    draw_heroes(cv)
+    draw_numbers(cv)
+    draw_grid(cv)
+    places = set()
+    for col in (COL1, COL2, COL3):
+        for place, _ in col:
+            places.add(place)
+    n_stories = len(HEROES) + len(COL1) + len(COL2) + len(COL3) \
+        + len(NUMBERS) + len(TIMELINE) + 1
+    draw_bottom(cv, n_stories, len(places))
+    return cv, n_stories, len(places)
 
 
 def main():
-    n_stories, n_regions = build()
-    data = png_bytes()
     outdir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
     os.makedirs(outdir, exist_ok=True)
-    out = os.path.join(outdir, "entry.png")
-    with open(out, "wb") as f:
+    cv, n_stories, n_places = build()
+    data = encode_png(cv.px, W, H)
+    path = os.path.join(outdir, "entry.png")
+    with open(path, "wb") as f:
         f.write(data)
-    md5 = hashlib.md5(data).hexdigest()
-    print("stories=%d regions=%d size=%d md5=%s out=%s"
-          % (n_stories, n_regions, len(data), md5, out))
+    print("stories=%d places=%d bytes=%d md5=%s" % (
+        n_stories, n_places, len(data),
+        hashlib.md5(data).hexdigest()))
+    print("wrote " + path)
 
 
 if __name__ == "__main__":
